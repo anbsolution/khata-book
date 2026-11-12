@@ -191,7 +191,11 @@ fun AuthScreen(
                         authRepository.currentUser()
                         onAuthenticated()
                     } catch (e: Exception) {
-                        error = e.message ?: "Authentication failed"
+                        error = if (e is io.appwrite.exceptions.AppwriteException) {
+                            "Appwrite error: ${e.type} (HTTP ${e.code})\n${e.message ?: "No details"}"
+                        } else {
+                            "${e::class.java.simpleName}: ${e.message ?: "Authentication failed"}"
+                        }
                     } finally {
                         busy = false
                     }
