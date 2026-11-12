@@ -1,7 +1,10 @@
 package com.anbsolution.khatabook
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
@@ -29,6 +32,7 @@ import com.anbsolution.khatabook.data.LedgerTransactionEntity
 import com.anbsolution.khatabook.services.Appwrite
 import com.anbsolution.khatabook.services.AuthRepository
 import com.anbsolution.khatabook.services.PinLockStore
+import com.anbsolution.khatabook.services.DeviceBindingStore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -39,7 +43,7 @@ import java.util.Locale
 private val RoyalBlue = Color(0xFF1746A2)
 private val PageWhite = Color(0xFFF7F9FC)
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -76,11 +80,21 @@ fun KhataBookApp() {
     LaunchedEffect(Unit) {
         signedIn = try {
             authRepository.currentUser()
-            pinConfigured = PinLockStore.hasPin(context)
-            true
+            val hasLocalPin = PinLockStore.hasPin(context)
+            if (hasLocalPin && !DeviceBindingStore.verify(context)) {
+                // Existing PIN without a valid installation key requires email reauthentication.
+                pinConfigured = false
+                false
+            } else {
+                if (!hasLocalPin && !DeviceBindingStore.isRegistered(context)) {
+                    DeviceBindingStore.register(context)
+                }
+                pinConfigured = hasLocalPin
+                true
+            }
         } catch (_: Exception) {
-            PinLockStore.clear(context)
-            pinConfigured = false
+            // Network/session lookup errors must never erase local PIN or device keys.
+            pinConfigured = PinLockStore.hasPin(context)
             false
         }
         checkingSession = false
@@ -115,10 +129,21 @@ fun KhataBookApp() {
             AuthScreen(
                 authRepository = authRepository,
                 onAuthenticated = {
-                    pinConfigured = PinLockStore.hasPin(context)
-                    pinUnlocked = false
-                    recoveryError = null
-                    signedIn = true
+                    scope.launch {
+                        try {
+                            if (!DeviceBindingStore.verify(context)) {
+                                PinLockStore.clear(context)
+                                DeviceBindingStore.clear(context)
+                                DeviceBindingStore.register(context)
+                            }
+                            pinConfigured = PinLockStore.hasPin(context)
+                            pinUnlocked = false
+                            recoveryError = null
+                            signedIn = true
+                        } catch (e: Exception) {
+                            recoveryError = e.message ?: "Unable to register this device securely."
+                        }
+                    }
                 }
             )
         }
@@ -358,6 +383,57 @@ private fun PinUnlockScreen(
             shape = RoundedCornerShape(14.dp)
         ) {
             Text(if (busy) "Checking..." else "Unlock")
+        }
+
+        val activity = context as? FragmentActivity
+        val biometricAvailable = BiometricManager.from(context).canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_STRONG
+        ) == BiometricManager.BIOMETRIC_SUCCESS
+
+        if (activity != null && biometricAvailable) {
+            OutlinedButton(
+                onClick = {
+                    val prompt = BiometricPrompt(
+                        activity,
+                        ContextCompat.getMainExecutor(context),
+                        object : BiometricPrompt.AuthenticationCallback() {
+                            override fun onAuthenticationSucceeded(
+                                result: BiometricPrompt.AuthenticationResult
+                            ) {
+                                pin = ""
+                                message = null
+                                onUnlocked()
+                            }
+
+                            override fun onAuthenticationError(
+                                errorCode: Int,
+                                errString: CharSequence
+                            ) {
+                                message = "Biometric unavailable. You can unlock with your PIN."
+                            }
+
+                            override fun onAuthenticationFailed() {
+                                message = "Fingerprint not recognized. Try again or use your PIN."
+                            }
+                        }
+                    )
+                    val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Unlock Khata Book")
+                        .setSubtitle("Verify your fingerprint or supported strong biometric")
+                        .setDescription("Your biometric data stays with Android; Khata Book does not receive it.")
+                        .setAllowedAuthenticators(
+                            BiometricManager.Authenticators.BIOMETRIC_STRONG
+                        )
+                        .setNegativeButtonText("Use PIN")
+                        .build()
+                    prompt.authenticate(promptInfo)
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Fingerprint, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Unlock with fingerprint")
+            }
         }
 
         TextButton(
