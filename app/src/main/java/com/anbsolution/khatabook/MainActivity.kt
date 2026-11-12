@@ -1,6 +1,7 @@
 package com.anbsolution.khatabook
 
 import android.os.Bundle
+import com.anbsolution.khatabook.services.Appwrite
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -23,6 +24,7 @@ private val PageWhite = Color(0xFFF7F9FC)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Appwrite.init(applicationContext)
         setContent {
             MaterialTheme(
                 colorScheme = lightColorScheme(
