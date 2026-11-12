@@ -3,9 +3,10 @@ package com.anbsolution.khatabook.services
 import io.appwrite.ID
 import io.appwrite.models.Session
 import io.appwrite.models.User
+import io.appwrite.services.Account
 
 class AuthRepository {
-    private val account
+    private val account: Account
         get() {
             check(Appwrite.isInitialized()) {
                 "Appwrite must be initialized first"
