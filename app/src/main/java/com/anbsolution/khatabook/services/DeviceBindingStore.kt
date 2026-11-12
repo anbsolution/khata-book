@@ -56,7 +56,8 @@ object DeviceBindingStore {
         check(saved) { "Unable to save device registration" }
     }
 
-    fun verify(context: Context): Boolean = try {
+    fun verify(context: Context): Boolean {
+        return try {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val savedText = prefs.getString(PUBLIC_KEY, null) ?: return false
 
@@ -79,8 +80,9 @@ object DeviceBindingStore {
         verifier.initVerify(publicKey)
         verifier.update(challenge)
         verifier.verify(signed)
-    } catch (_: Exception) {
-        false
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun clear(context: Context) {
