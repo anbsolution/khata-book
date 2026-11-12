@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.anbsolution.khatabook"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.anbsolution.khatabook"
