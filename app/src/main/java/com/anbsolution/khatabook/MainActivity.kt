@@ -40,6 +40,12 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.Locale
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.widget.Toast
+import com.anbsolution.khatabook.services.KhataBackupManager
 private val RoyalBlue = Color(0xFF1746A2)
 private val PageWhite = Color(0xFFF7F9FC)
 
@@ -650,6 +656,8 @@ fun MainDashboard(
                     if (error != null) {
                         Text(error ?: "", color = MaterialTheme.colorScheme.error)
                     }
+                    KhataBackupSection(database)
+                    Spacer(Modifier.height(12.dp))
                     Button(
                         onClick = {
                             busy = true
@@ -1296,6 +1304,167 @@ fun CustomerLedgerScreen(
                 TextButton(onClick = { deletingTransaction = null }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+}
+
+
+@Composable
+private fun KhataBackupSection(database: KhataDatabase) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var createPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var restorePassword by remember { mutableStateOf("") }
+    var pendingBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var confirmRestore by remember { mutableStateOf(false) }
+
+    val savePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        val bytes = pendingBytes
+        if (uri != null && bytes != null) {
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                            ?: error("Could not open the selected destination.")
+                    }
+                    status = "Encrypted backup saved successfully."
+                } catch (e: Exception) {
+                    status = e.message ?: "Backup export failed."
+                } finally {
+                    pendingBytes = null
+                    busy = false
+                }
+            }
+        } else {
+            pendingBytes = null
+            busy = false
+        }
+    }
+
+    val restorePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val bytes = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            val out = java.io.ByteArrayOutputStream()
+                            val buffer = ByteArray(8192)
+                            var total = 0
+                            while (true) {
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                total += n
+                                require(total <= 50 * 1024 * 1024) { "Backup file is too large." }
+                                out.write(buffer, 0, n)
+                            }
+                            out.toByteArray()
+                        } ?: error("Could not read selected backup.")
+                    }
+                    withContext(Dispatchers.IO) {
+                        KhataBackupManager.restoreBackup(database, bytes, restorePassword)
+                    }
+                    status = "Restore completed. Local data has been replaced."
+                    restorePassword = ""
+                } catch (e: Exception) {
+                    status = e.message ?: "Restore failed. Existing data was not changed."
+                } finally {
+                    busy = false
+                }
+            }
+        } else {
+            busy = false
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Text("Secure Backup & Restore", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Encrypted .khata backup for this or another device.", color = Color.Gray, fontSize = 13.sp)
+            OutlinedTextField(
+                value = createPassword, onValueChange = { createPassword = it },
+                label = { Text("New backup password (12+ characters)") },
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = confirmPassword, onValueChange = { confirmPassword = it },
+                label = { Text("Confirm backup password") },
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Button(
+                enabled = !busy && createPassword.length >= 12 && createPassword == confirmPassword,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    scope.launch {
+                        busy = true
+                        status = null
+                        try {
+                            val data = withContext(Dispatchers.IO) {
+                                KhataBackupManager.createBackup(database, createPassword)
+                            }
+                            pendingBytes = data
+                            createPassword = ""
+                            confirmPassword = ""
+                            savePicker.launch("khata-book-backup.khata")
+                        } catch (e: Exception) {
+                            status = e.message ?: "Could not create backup."
+                            busy = false
+                        }
+                    }
+                }
+            ) { Text(if (busy) "Please wait..." else "Create Encrypted Backup") }
+
+            HorizontalDivider()
+            OutlinedTextField(
+                value = restorePassword, onValueChange = { restorePassword = it },
+                label = { Text("Backup password to restore") },
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedButton(
+                enabled = !busy && restorePassword.length >= 12,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { confirmRestore = true }
+            ) { Text("Choose Backup & Restore") }
+            Text(
+                "Restore replaces current local data. Keep a separate backup first. " +
+                    "A forgotten backup password cannot be recovered.",
+                color = Color(0xFF9A5B00), fontSize = 12.sp
+            )
+            status?.let { Text(it, color = if (
+                it.contains("failed", true) || it.contains("wrong", true) ||
+                it.contains("invalid", true) || it.contains("could not", true)
+            ) MaterialTheme.colorScheme.error else Color(0xFF16834A)) }
+        }
+    }
+
+    if (confirmRestore) {
+        AlertDialog(
+            onDismissRequest = { confirmRestore = false },
+            title = { Text("Replace local data?") },
+            text = { Text("All businesses, customers, transactions and pending sync entries on this device will be replaced.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRestore = false
+                    busy = true
+                    restorePicker.launch(arrayOf("*/*"))
+                }) { Text("Continue") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRestore = false }) { Text("Cancel") }
             }
         )
     }

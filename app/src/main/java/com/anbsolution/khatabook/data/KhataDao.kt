@@ -55,4 +55,41 @@ interface KhataDao {
 
     @Query("SELECT * FROM sync_queue ORDER BY createdAt")
     suspend fun getPendingSync(): List<SyncQueueEntity>
+
+    @Query("SELECT * FROM businesses ORDER BY createdAt")
+    suspend fun getAllBusinessesForBackup(): List<BusinessEntity>
+
+    @Query("SELECT * FROM customers ORDER BY createdAt")
+    suspend fun getAllCustomersForBackup(): List<CustomerEntity>
+
+    @Query("SELECT * FROM ledger_transactions ORDER BY createdAt")
+    suspend fun getAllTransactionsForBackup(): List<LedgerTransactionEntity>
+
+    @Query("SELECT * FROM sync_queue ORDER BY createdAt")
+    suspend fun getAllSyncQueueForBackup(): List<SyncQueueEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBusinessesForRestore(items: List<BusinessEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCustomersForRestore(items: List<CustomerEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTransactionsForRestore(items: List<LedgerTransactionEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSyncQueueForRestore(items: List<SyncQueueEntity>)
+
+    @Query("DELETE FROM sync_queue")
+    suspend fun clearSyncQueueForRestore()
+
+    @Query("DELETE FROM ledger_transactions")
+    suspend fun clearTransactionsForRestore()
+
+    @Query("DELETE FROM customers")
+    suspend fun clearCustomersForRestore()
+
+    @Query("DELETE FROM businesses")
+    suspend fun clearBusinessesForRestore()
+
 }
