@@ -32,7 +32,7 @@ jobs:
           gradle-version: "9.3.1"
 
       - name: Build debug APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug --stacktrace --info
 
       - name: Run unit tests
         run: gradle testDebugUnitTest
