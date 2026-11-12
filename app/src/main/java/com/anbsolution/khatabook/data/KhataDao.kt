@@ -44,6 +44,15 @@ interface KhataDao {
     @Query("SELECT * FROM ledger_transactions WHERE customerId = :customerId ORDER BY createdAt DESC")
     suspend fun getCustomerTransactions(customerId: String): List<LedgerTransactionEntity>
 
+    @Query("SELECT COUNT(*) FROM ledger_transactions WHERE customerId = :customerId")
+    suspend fun getCustomerTransactionCount(customerId: String): Int
+
+    @Update
+    suspend fun updateTransaction(item: LedgerTransactionEntity)
+
+    @Delete
+    suspend fun deleteTransaction(item: LedgerTransactionEntity)
+
     @Query("SELECT * FROM sync_queue ORDER BY createdAt")
     suspend fun getPendingSync(): List<SyncQueueEntity>
 }

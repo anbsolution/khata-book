@@ -521,8 +521,14 @@ fun CustomerScreen(
                                 TextButton(onClick = {
                                     scope.launch {
                                         try {
-                                            dao.deleteCustomer(customer)
-                                            refresh()
+                                            val count = dao.getCustomerTransactionCount(customer.id)
+                                            if (count > 0) {
+                                                error = "This customer has $count ledger entries. Delete is blocked to protect account history."
+                                            } else {
+                                                dao.deleteCustomer(customer)
+                                                refresh()
+                                                error = null
+                                            }
                                         } catch (e: Exception) {
                                             error = e.message ?: "Delete failed"
                                         }
@@ -622,6 +628,8 @@ fun CustomerLedgerScreen(
     var note by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
+    var editingTransaction by remember { mutableStateOf<LedgerTransactionEntity?>(null) }
+    var deletingTransaction by remember { mutableStateOf<LedgerTransactionEntity?>(null) }
 
     suspend fun refresh() {
         transactions = dao.getCustomerTransactions(customer.id)
@@ -763,6 +771,26 @@ fun CustomerLedgerScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = {
+                                editingTransaction = item
+                                transactionType = item.type
+                                amount = BigDecimal.valueOf(item.amountPaise, 2).toPlainString()
+                                note = item.note
+                                error = null
+                                showDialog = true
+                            }) {
+                                Text("Edit")
+                            }
+                            TextButton(onClick = {
+                                deletingTransaction = item
+                            }) {
+                                Text("Delete")
+                            }
+                        }
                     }
                 }
             }
@@ -772,9 +800,15 @@ fun CustomerLedgerScreen(
     if (showDialog) {
         AlertDialog(
             onDismissRequest = {
-                if (!saving) showDialog = false
+                if (!saving) {
+                    showDialog = false
+                    editingTransaction = null
+                    error = null
+                }
             },
-            title = { Text("Add transaction") },
+            title = {
+                Text(if (editingTransaction == null) "Add transaction" else "Edit transaction")
+            },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -829,20 +863,27 @@ fun CustomerLedgerScreen(
                             error = null
                             scope.launch {
                                 try {
-                                    dao.saveTransaction(
-                                        LedgerTransactionEntity(
-                                            id = UUID.randomUUID().toString(),
-                                            businessId = customer.businessId,
-                                            customerId = customer.id,
-                                            type = transactionType,
-                                            amountPaise = paise,
-                                            note = note.trim(),
-                                            createdAt = System.currentTimeMillis(),
-                                            synced = false
-                                        )
+                                    val existing = editingTransaction
+                                    val transaction = LedgerTransactionEntity(
+                                        id = existing?.id ?: UUID.randomUUID().toString(),
+                                        businessId = customer.businessId,
+                                        customerId = customer.id,
+                                        type = transactionType,
+                                        amountPaise = paise,
+                                        note = note.trim(),
+                                        createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+                                        synced = false
                                     )
+                                    if (existing == null) {
+                                        dao.saveTransaction(transaction)
+                                    } else {
+                                        dao.updateTransaction(transaction)
+                                    }
                                     refresh()
                                     showDialog = false
+                                    editingTransaction = null
+                                    amount = ""
+                                    note = ""
                                 } catch (e: Exception) {
                                     error = e.message ?: "Unable to save transaction"
                                 } finally {
@@ -857,9 +898,50 @@ fun CustomerLedgerScreen(
             },
             dismissButton = {
                 TextButton(
-                    onClick = { showDialog = false },
+                    onClick = {
+                        showDialog = false
+                        editingTransaction = null
+                        error = null
+                    },
                     enabled = !saving
                 ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    val pendingDelete = deletingTransaction
+    if (pendingDelete != null) {
+        AlertDialog(
+            onDismissRequest = { deletingTransaction = null },
+            title = { Text("Delete transaction?") },
+            text = {
+                Text(
+                    "Delete ${pendingDelete.type.lowercase()} entry of " +
+                        formatRupees(pendingDelete.amountPaise) +
+                        "? This action cannot be undone."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        try {
+                            dao.deleteTransaction(pendingDelete)
+                            refresh()
+                            deletingTransaction = null
+                            error = null
+                        } catch (e: Exception) {
+                            error = e.message ?: "Unable to delete transaction"
+                            deletingTransaction = null
+                        }
+                    }
+                }) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingTransaction = null }) {
                     Text("Cancel")
                 }
             }
