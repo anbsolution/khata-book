@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.platform.LocalContext
@@ -24,10 +25,14 @@ import androidx.compose.ui.unit.sp
 import com.anbsolution.khatabook.data.KhataDatabaseProvider
 import com.anbsolution.khatabook.data.KhataDatabase
 import com.anbsolution.khatabook.data.CustomerEntity
+import com.anbsolution.khatabook.data.LedgerTransactionEntity
 import com.anbsolution.khatabook.services.Appwrite
 import com.anbsolution.khatabook.services.AuthRepository
 import kotlinx.coroutines.launch
 import java.util.UUID
+import java.math.BigDecimal
+import java.math.RoundingMode
+import java.util.Locale
 
 private val RoyalBlue = Color(0xFF1746A2)
 private val PageWhite = Color(0xFFF7F9FC)
@@ -377,6 +382,7 @@ fun PlaceholderScreen(title: String) {
 }
 
 
+
 @Composable
 fun CustomerScreen(
     database: KhataDatabase,
@@ -391,6 +397,7 @@ fun CustomerScreen(
     var customerName by remember { mutableStateOf("") }
     var customerPhone by remember { mutableStateOf("") }
     var editingCustomer by remember { mutableStateOf<CustomerEntity?>(null) }
+    var selectedCustomer by remember { mutableStateOf<CustomerEntity?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -415,6 +422,16 @@ fun CustomerScreen(
         }
     }
 
+    val activeCustomer = selectedCustomer
+    if (activeCustomer != null) {
+        CustomerLedgerScreen(
+            database = database,
+            customer = activeCustomer,
+            onBack = { selectedCustomer = null }
+        )
+        return
+    }
+
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -424,11 +441,7 @@ fun CustomerScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "Customers",
-                fontSize = 21.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text("Customers", fontSize = 21.sp, fontWeight = FontWeight.Bold)
             Button(onClick = {
                 editingCustomer = null
                 customerName = ""
@@ -456,72 +469,66 @@ fun CustomerScreen(
             singleLine = true
         )
 
-        if (error != null) {
-            Text(
-                error ?: "",
-                color = MaterialTheme.colorScheme.error
-            )
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error)
         }
 
         when {
-            loading -> {
-                CircularProgressIndicator()
-            }
-
-            customers.isEmpty() -> {
-                Text(
-                    "No customers found. Add your first customer.",
-                    color = Color.Gray
-                )
-            }
-
-            else -> {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(customers, key = { it.id }) { customer ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Column(Modifier.padding(14.dp)) {
-                                Text(
-                                    customer.name,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 17.sp
-                                )
-                                Text(
-                                    customer.phone.ifBlank { "No phone number" },
-                                    color = Color.Gray
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End
-                                ) {
-                                    TextButton(onClick = {
-                                        editingCustomer = customer
-                                        customerName = customer.name
-                                        customerPhone = customer.phone
-                                        showDialog = true
-                                    }) {
-                                        Text("Edit")
-                                    }
-                                    TextButton(onClick = {
-                                        scope.launch {
-                                            try {
-                                                dao.deleteCustomer(customer)
-                                                refresh()
-                                            } catch (e: Exception) {
-                                                error = e.message ?: "Delete failed"
-                                            }
+            loading -> CircularProgressIndicator()
+            customers.isEmpty() -> Text(
+                "No customers found. Add your first customer.",
+                color = Color.Gray
+            )
+            else -> LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(customers, key = { it.id }) { customer ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedCustomer = customer },
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text(
+                                customer.name,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp
+                            )
+                            Text(
+                                customer.phone.ifBlank { "No phone number" },
+                                color = Color.Gray
+                            )
+                            Text(
+                                "Open ledger  →",
+                                color = RoyalBlue,
+                                fontSize = 13.sp
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(onClick = {
+                                    editingCustomer = customer
+                                    customerName = customer.name
+                                    customerPhone = customer.phone
+                                    showDialog = true
+                                }) {
+                                    Text("Edit")
+                                }
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        try {
+                                            dao.deleteCustomer(customer)
+                                            refresh()
+                                        } catch (e: Exception) {
+                                            error = e.message ?: "Delete failed"
                                         }
-                                    }) {
-                                        Text("Delete", color = MaterialTheme.colorScheme.error)
                                     }
+                                }) {
+                                    Text("Delete", color = MaterialTheme.colorScheme.error)
                                 }
                             }
                         }
@@ -550,9 +557,7 @@ fun CustomerScreen(
                         onValueChange = { customerPhone = it },
                         label = { Text("Mobile number") },
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Phone
-                        )
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
                     )
                 }
             },
@@ -570,11 +575,8 @@ fun CustomerScreen(
                                     phone = customerPhone.trim(),
                                     createdAt = old?.createdAt ?: System.currentTimeMillis()
                                 )
-                                if (old == null) {
-                                    dao.saveCustomer(item)
-                                } else {
-                                    dao.updateCustomer(item)
-                                }
+                                if (old == null) dao.saveCustomer(item)
+                                else dao.updateCustomer(item)
                                 showDialog = false
                                 refresh()
                             } catch (e: Exception) {
@@ -588,6 +590,276 @@ fun CustomerScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+private fun formatRupees(amountPaise: Long): String {
+    val rupees = amountPaise / 100
+    val paise = kotlin.math.abs(amountPaise % 100)
+    return "₹$rupees.${paise.toString().padStart(2, '0')}"
+}
+
+@Composable
+fun CustomerLedgerScreen(
+    database: KhataDatabase,
+    customer: CustomerEntity,
+    onBack: () -> Unit
+) {
+    val dao = remember { database.khataDao() }
+    val scope = rememberCoroutineScope()
+
+    var transactions by remember {
+        mutableStateOf<List<LedgerTransactionEntity>>(emptyList())
+    }
+    var loading by remember { mutableStateOf(true) }
+    var showDialog by remember { mutableStateOf(false) }
+    var transactionType by remember { mutableStateOf("UDHAR") }
+    var amount by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+
+    suspend fun refresh() {
+        transactions = dao.getCustomerTransactions(customer.id)
+    }
+
+    LaunchedEffect(customer.id) {
+        try {
+            refresh()
+        } catch (e: Exception) {
+            error = e.message ?: "Unable to load ledger"
+        } finally {
+            loading = false
+        }
+    }
+
+    val udharTotal = transactions
+        .filter { it.type == "UDHAR" }
+        .sumOf { it.amountPaise }
+
+    val jamaTotal = transactions
+        .filter { it.type == "JAMA" }
+        .sumOf { it.amountPaise }
+
+    val balance = udharTotal - jamaTotal
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TextButton(onClick = onBack) {
+                Text("← Back")
+            }
+            Column {
+                Text(customer.name, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Text(customer.phone, color = Color.Gray, fontSize = 13.sp)
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Current balance", color = Color.Gray)
+                Text(
+                    formatRupees(kotlin.math.abs(balance)),
+                    fontSize = 27.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (balance >= 0) RoyalBlue else Color(0xFF16834A)
+                )
+                Text(
+                    if (balance > 0) "Customer owes you"
+                    else if (balance < 0) "You owe customer"
+                    else "Account settled",
+                    color = Color.DarkGray
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("You will get", color = Color.Gray, fontSize = 12.sp)
+                        Text(formatRupees(udharTotal), color = RoyalBlue, fontWeight = FontWeight.Bold)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("You received", color = Color.Gray, fontSize = 12.sp)
+                        Text(formatRupees(jamaTotal), color = Color(0xFF16834A), fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        Button(
+            onClick = {
+                transactionType = "UDHAR"
+                amount = ""
+                note = ""
+                error = null
+                showDialog = true
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("+ Add transaction")
+        }
+
+        Text("Transaction history", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
+
+        when {
+            loading -> CircularProgressIndicator()
+            transactions.isEmpty() -> Text(
+                "No transactions yet.",
+                color = Color.Gray
+            )
+            else -> LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(transactions, key = { it.id }) { item ->
+                    val isUdhar = item.type == "UDHAR"
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    if (isUdhar) "Udhar" else "Jama",
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (item.note.isNotBlank()) {
+                                    Text(item.note, color = Color.Gray, fontSize = 13.sp)
+                                }
+                                Text(
+                                    java.text.DateFormat.getDateTimeInstance(
+                                        java.text.DateFormat.MEDIUM,
+                                        java.text.DateFormat.SHORT
+                                    ).format(java.util.Date(item.createdAt)),
+                                    color = Color.Gray,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Text(
+                                (if (isUdhar) "+" else "-") + formatRupees(item.amountPaise),
+                                color = if (isUdhar) RoyalBlue else Color(0xFF16834A),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!saving) showDialog = false
+            },
+            title = { Text("Add transaction") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = transactionType == "UDHAR",
+                            onClick = { transactionType = "UDHAR" },
+                            label = { Text("Udhar") }
+                        )
+                        FilterChip(
+                            selected = transactionType == "JAMA",
+                            onClick = { transactionType = "JAMA" },
+                            label = { Text("Jama") }
+                        )
+                    }
+                    OutlinedTextField(
+                        value = amount,
+                        onValueChange = { amount = it },
+                        label = { Text("Amount (₹)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Decimal
+                        )
+                    )
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        label = { Text("Note (optional)") },
+                        minLines = 2
+                    )
+                    error?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !saving && amount.isNotBlank(),
+                    onClick = {
+                        val paise = try {
+                            BigDecimal(amount.trim())
+                                .movePointRight(2)
+                                .setScale(0, RoundingMode.HALF_UP)
+                                .longValueExact()
+                        } catch (_: Exception) {
+                            0L
+                        }
+
+                        if (paise <= 0L) {
+                            error = "Enter a valid amount greater than zero"
+                        } else {
+                            saving = true
+                            error = null
+                            scope.launch {
+                                try {
+                                    dao.saveTransaction(
+                                        LedgerTransactionEntity(
+                                            id = UUID.randomUUID().toString(),
+                                            businessId = customer.businessId,
+                                            customerId = customer.id,
+                                            type = transactionType,
+                                            amountPaise = paise,
+                                            note = note.trim(),
+                                            createdAt = System.currentTimeMillis(),
+                                            synced = false
+                                        )
+                                    )
+                                    refresh()
+                                    showDialog = false
+                                } catch (e: Exception) {
+                                    error = e.message ?: "Unable to save transaction"
+                                } finally {
+                                    saving = false
+                                }
+                            }
+                        }
+                    }
+                ) {
+                    Text(if (saving) "Saving..." else "Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDialog = false },
+                    enabled = !saving
+                ) {
                     Text("Cancel")
                 }
             }
