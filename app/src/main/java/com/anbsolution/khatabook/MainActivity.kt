@@ -28,6 +28,8 @@ import com.anbsolution.khatabook.data.CustomerEntity
 import com.anbsolution.khatabook.data.LedgerTransactionEntity
 import com.anbsolution.khatabook.services.Appwrite
 import com.anbsolution.khatabook.services.AuthRepository
+import com.anbsolution.khatabook.services.PinLockStore
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 import java.math.BigDecimal
@@ -63,37 +65,307 @@ fun KhataBookApp() {
     val context = LocalContext.current
     val database = remember { KhataDatabaseProvider.get(context) }
     val authRepository = remember { AuthRepository() }
+    val scope = rememberCoroutineScope()
+
     var signedIn by remember { mutableStateOf(false) }
     var checkingSession by remember { mutableStateOf(true) }
+    var pinConfigured by remember { mutableStateOf(false) }
+    var pinUnlocked by remember { mutableStateOf(false) }
+    var recoveryError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         signedIn = try {
             authRepository.currentUser()
+            pinConfigured = PinLockStore.hasPin(context)
             true
         } catch (_: Exception) {
+            PinLockStore.clear(context)
+            pinConfigured = false
             false
         }
         checkingSession = false
     }
 
-    if (checkingSession) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator(color = RoyalBlue)
+    fun startEmailRecovery() {
+        recoveryError = null
+        scope.launch {
+            try {
+                authRepository.logout()
+                PinLockStore.clear(context)
+                pinConfigured = false
+                pinUnlocked = false
+                signedIn = false
+            } catch (e: Exception) {
+                recoveryError = e.message ?: "Email login required. Logout failed; check your internet and retry."
+            }
         }
-    } else if (!signedIn) {
-        AuthScreen(
-            authRepository = authRepository,
-            onAuthenticated = { signedIn = true }
+    }
+
+    when {
+        checkingSession -> {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = RoyalBlue)
+            }
+        }
+
+        !signedIn -> {
+            AuthScreen(
+                authRepository = authRepository,
+                onAuthenticated = {
+                    pinConfigured = PinLockStore.hasPin(context)
+                    pinUnlocked = false
+                    recoveryError = null
+                    signedIn = true
+                }
+            )
+        }
+
+        !pinUnlocked && !pinConfigured -> {
+            PinSetupScreen(
+                onPinCreated = {
+                    pinConfigured = true
+                    pinUnlocked = true
+                }
+            )
+        }
+
+        !pinUnlocked -> {
+            PinUnlockScreen(
+                recoveryError = recoveryError,
+                onUnlocked = { pinUnlocked = true },
+                onForgotPin = { startEmailRecovery() }
+            )
+        }
+
+        else -> {
+            MainDashboard(
+                database = database,
+                authRepository = authRepository,
+                onLogout = {
+                    PinLockStore.clear(context)
+                    pinConfigured = false
+                    pinUnlocked = false
+                    signedIn = false
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun PinSetupScreen(
+    onPinCreated: () -> Unit
+) {
+    val context = LocalContext.current
+    var pin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            "Create your 4-digit PIN",
+            color = RoyalBlue,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold
         )
-    } else {
-        MainDashboard(
-            database = database,
-            authRepository = authRepository,
-            onLogout = { signedIn = false }
+        Spacer(Modifier.height(8.dp))
+        Text("This PIN unlocks Khata Book on this device.")
+        Spacer(Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = pin,
+            onValueChange = {
+                if (it.length <= 4 && it.all(Char::isDigit)) {
+                    pin = it
+                    error = null
+                }
+            },
+            label = { Text("Enter 4-digit PIN") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            modifier = Modifier.fillMaxWidth()
         )
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = confirmPin,
+            onValueChange = {
+                if (it.length <= 4 && it.all(Char::isDigit)) {
+                    confirmPin = it
+                    error = null
+                }
+            },
+            label = { Text("Confirm 4-digit PIN") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        error?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Button(
+            enabled = !busy && pin.length == 4 && confirmPin.length == 4,
+            onClick = {
+                if (pin != confirmPin) {
+                    error = "PINs do not match. Try again."
+                } else {
+                    busy = true
+                    error = null
+                    scope.launch {
+                        try {
+                            PinLockStore.setPin(context, pin)
+                            pin = ""
+                            confirmPin = ""
+                            onPinCreated()
+                        } catch (e: Exception) {
+                            error = e.message ?: "Unable to save PIN securely."
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Text(if (busy) "Saving..." else "Save PIN")
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Your PIN is stored securely on this device. It is not your account password.",
+            color = Color.Gray,
+            fontSize = 12.sp
+        )
+    }
+}
+
+@Composable
+private fun PinUnlockScreen(
+    recoveryError: String?,
+    onUnlocked: () -> Unit,
+    onForgotPin: () -> Unit
+) {
+    val context = LocalContext.current
+    var pin by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<String?>(null) }
+    var remainingSeconds by remember { mutableIntStateOf(0) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(remainingSeconds) {
+        if (remainingSeconds > 0) {
+            delay(1000)
+            remainingSeconds -= 1
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            "Welcome back",
+            color = RoyalBlue,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(8.dp))
+        Text("Enter your 4-digit PIN to unlock Khata Book.")
+        Spacer(Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = pin,
+            onValueChange = {
+                if (it.length <= 4 && it.all(Char::isDigit)) {
+                    pin = it
+                    message = null
+                }
+            },
+            label = { Text("4-digit PIN") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        recoveryError?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
+        message?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
+        if (remainingSeconds > 0) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Too many incorrect attempts. Try again in $remainingSeconds seconds.",
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Button(
+            enabled = !busy && remainingSeconds == 0 && pin.length == 4,
+            onClick = {
+                busy = true
+                scope.launch {
+                    when (val result = PinLockStore.verifyPin(context, pin)) {
+                        is PinLockStore.VerifyResult.Success -> {
+                            pin = ""
+                            message = null
+                            onUnlocked()
+                        }
+                        is PinLockStore.VerifyResult.Incorrect -> {
+                            pin = ""
+                            message = "Incorrect PIN. ${result.attemptsRemaining} attempts remaining."
+                        }
+                        is PinLockStore.VerifyResult.Locked -> {
+                            pin = ""
+                            remainingSeconds = result.secondsRemaining
+                            message = null
+                        }
+                        is PinLockStore.VerifyResult.StorageError -> {
+                            pin = ""
+                            message = "Secure PIN data is unavailable. Use Forgot PIN to sign in again."
+                        }
+                    }
+                    busy = false
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Text(if (busy) "Checking..." else "Unlock")
+        }
+
+        TextButton(
+            onClick = onForgotPin,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Forgot PIN? Sign in with email")
+        }
     }
 }
 
