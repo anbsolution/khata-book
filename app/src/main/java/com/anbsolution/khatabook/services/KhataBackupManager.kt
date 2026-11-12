@@ -29,13 +29,15 @@ object KhataBackupManager {
 
     suspend fun createBackup(database: KhataDatabase, password: String): ByteArray {
         require(password.length >= 12) { "Backup password must contain at least 12 characters." }
-        val dao = database.khataDao()
-        val snapshot = Snapshot(
-            dao.getAllBusinessesForBackup(),
-            dao.getAllCustomersForBackup(),
-            dao.getAllTransactionsForBackup(),
-            dao.getAllSyncQueueForBackup()
-        )
+        val snapshot = database.withTransaction {
+            val dao = database.khataDao()
+            Snapshot(
+                dao.getAllBusinessesForBackup(),
+                dao.getAllCustomersForBackup(),
+                dao.getAllTransactionsForBackup(),
+                dao.getAllSyncQueueForBackup()
+            )
+        }
         return encrypt(encode(snapshot).toString().toByteArray(Charsets.UTF_8), password)
     }
 
@@ -68,7 +70,7 @@ object KhataBackupManager {
             )
         } finally {
             spec.clearPassword()
-            chars.fill('\\u0000')
+            chars.fill('\u0000')
         }
     }
 
@@ -157,8 +159,13 @@ object KhataBackupManager {
                 it.getLong("createdAt"), it.optBoolean("synced", false))
         }
         val queue = root.getJSONArray("syncQueue").mapObjects {
-            SyncQueueEntity(requiredText(it, "id"), requiredText(it, "entityType"),
-                requiredText(it, "entityId"), requiredText(it, "operation"), it.getLong("createdAt"))
+            SyncQueueEntity(
+                requiredText(it, "id"),
+                requiredText(it, "entityType"),
+                requiredText(it, "entityId"),
+                requiredText(it, "operation"),
+                it.getLong("createdAt")
+            )
         }
 
         fun unique(ids: List<String>, table: String) {
