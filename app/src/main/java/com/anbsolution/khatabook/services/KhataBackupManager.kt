@@ -108,7 +108,7 @@ object KhataBackupManager {
 
     private fun encode(s: Snapshot): JSONObject {
         val root = JSONObject().put("format", "khata-book")
-            .put("schemaVersion", 1).put("exportedAt", System.currentTimeMillis())
+            .put("schemaVersion", 2).put("exportedAt", System.currentTimeMillis())
         root.put("businesses", JSONArray().apply {
             s.businesses.forEach { put(JSONObject().put("id", it.id)
                 .put("accountId", it.accountId).put("businessName", it.businessName)
@@ -128,7 +128,9 @@ object KhataBackupManager {
         root.put("syncQueue", JSONArray().apply {
             s.queue.forEach { put(JSONObject().put("id", it.id)
                 .put("entityType", it.entityType).put("entityId", it.entityId)
-                .put("operation", it.operation).put("createdAt", it.createdAt)) }
+                .put("operation", it.operation).put("createdAt", it.createdAt)
+                .put("status", it.status).put("attempts", it.attempts)
+                .put("lastError", it.lastError)) }
         })
         return root
     }
@@ -136,7 +138,8 @@ object KhataBackupManager {
     private fun decode(plain: ByteArray): Snapshot {
         val root = JSONObject(String(plain, Charsets.UTF_8))
         require(root.getString("format") == "khata-book") { "Backup format is not recognized." }
-        require(root.getInt("schemaVersion") == 1) { "This backup version is not supported." }
+        val backupVersion = root.getInt("schemaVersion")
+        require(backupVersion in 1..2) { "This backup version is not supported." }
 
         fun requiredText(o: JSONObject, field: String): String =
             o.getString(field).also { require(it.isNotBlank()) { "Missing $field in backup." } }
@@ -164,7 +167,10 @@ object KhataBackupManager {
                 requiredText(it, "entityType"),
                 requiredText(it, "entityId"),
                 requiredText(it, "operation"),
-                it.getLong("createdAt")
+                it.getLong("createdAt"),
+                if (backupVersion >= 2) it.optString("status", "PENDING") else "PENDING",
+                if (backupVersion >= 2) it.optInt("attempts", 0) else 0,
+                if (backupVersion >= 2 && !it.isNull("lastError")) it.optString("lastError") else null
             )
         }
 
