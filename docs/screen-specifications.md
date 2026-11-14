@@ -9,6 +9,7 @@ The following screens define the v1.0 UI behavior.
   changing the IDs of businesses, customers, or transactions.
 - On later launches, sign in with the locally stored password hash.
 - Keep the device PIN and supported biometric unlock independent from account sign-in.
+- Lock the app behind the PIN after one minute in the background.
 - Account and ledger operations remain local to the device.
 
 ## 01. Splash
@@ -53,6 +54,7 @@ All figures must be calculated from local records, not hard-coded sample data.
 - Total Udhar, total Jama and current balance.
 - Transaction timeline with date, type, amount and note.
 - Transaction history filter: Today, Last 7 days, This month or All time.
+- Search transactions by note, type or amount.
 - Ledger totals and statement exports remain based on the full customer history.
 - Actions: Add Udhar, Add Jama, WhatsApp Share, PDF statement.
 - PDF export saves a paginated statement with customer totals and the full transaction history.
@@ -109,6 +111,7 @@ Show a clear summary before saving when appropriate.
 - Biometric unlock where device/platform supports it.
 - Language: Hindi and English.
 - Theme preferences.
+- Automatic encrypted daily and weekly local backups, with restore of the latest copy.
 - Backup and restore.
 - Statement-sharing preference: automatic, WhatsApp, WhatsApp Business or Android share sheet.
 - Data management.

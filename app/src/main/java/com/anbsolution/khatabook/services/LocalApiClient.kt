@@ -118,6 +118,23 @@ class LocalApiClient(context: Context) {
         )
     }
 
+    suspend fun createAutomaticBackup(): ByteArray =
+        request(
+            "POST",
+            "/v1/backup/automatic",
+            contentType = "application/octet-stream",
+            session = false
+        )
+
+    suspend fun restoreAutomaticBackup(bytes: ByteArray) {
+        request(
+            "POST",
+            "/v1/backup/automatic/restore",
+            body = bytes,
+            contentType = "application/octet-stream"
+        )
+    }
+
     private fun saveSession(user: LocalUser) {
         check(preferences.edit().putString(SESSION_USER, user.id).commit()) {
             "Unable to save local sign-in state."

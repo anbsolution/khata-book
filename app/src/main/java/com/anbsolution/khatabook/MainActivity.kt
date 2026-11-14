@@ -19,15 +19,20 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.TextStyle
@@ -43,6 +48,11 @@ import com.anbsolution.khatabook.data.LedgerTransactionEntity
 import com.anbsolution.khatabook.domain.LedgerCalculator
 import com.anbsolution.khatabook.domain.LedgerPeriod
 import com.anbsolution.khatabook.services.AuthRepository
+import com.anbsolution.khatabook.services.AppAppearanceMode
+import com.anbsolution.khatabook.services.AppearancePreferenceStore
+import com.anbsolution.khatabook.services.AutomaticBackupCadence
+import com.anbsolution.khatabook.services.LocalAutomaticBackupFiles
+import com.anbsolution.khatabook.services.LocalAutomaticBackupScheduler
 import com.anbsolution.khatabook.services.LocalApiClient
 import com.anbsolution.khatabook.services.LocalApiServer
 import com.anbsolution.khatabook.services.PinLockStore
@@ -68,12 +78,56 @@ import com.anbsolution.khatabook.services.ReportsCsv
 import com.anbsolution.khatabook.services.ReportsPdf
 import com.anbsolution.khatabook.services.StatementSharePreferenceStore
 import com.anbsolution.khatabook.services.StatementShareTarget
-private val RoyalBlue = Color(0xFF174EA6)
-private val PageWhite = Color(0xFFF2F4F7)
-private val PrimaryTint = Color(0xFFE8EFFB)
-private val MutedText = Color(0xFF667085)
-private val SurfaceBorder = Color(0xFFE5E7EB)
-private val JamaGreen = Color(0xFF16834A)
+import kotlinx.coroutines.Job
+
+private data class KhataPalette(
+    val royalBlue: Color,
+    val pageBackground: Color,
+    val primaryTint: Color,
+    val mutedText: Color,
+    val surfaceBorder: Color,
+    val jamaGreen: Color,
+    val jamaTint: Color,
+    val warningText: Color
+)
+
+private val LightKhataPalette = KhataPalette(
+    royalBlue = Color(0xFF174EA6),
+    pageBackground = Color(0xFFF2F4F7),
+    primaryTint = Color(0xFFE8EFFB),
+    mutedText = Color(0xFF667085),
+    surfaceBorder = Color(0xFFE5E7EB),
+    jamaGreen = Color(0xFF16834A),
+    jamaTint = Color(0xFFE9F5ED),
+    warningText = Color(0xFF9A5B00)
+)
+private val DarkKhataPalette = KhataPalette(
+    royalBlue = Color(0xFF9DBBFF),
+    pageBackground = Color(0xFF0D1117),
+    primaryTint = Color(0xFF1F3251),
+    mutedText = Color(0xFFA0A8B5),
+    surfaceBorder = Color(0xFF344054),
+    jamaGreen = Color(0xFF72D19B),
+    jamaTint = Color(0xFF163425),
+    warningText = Color(0xFFF4C36A)
+)
+private val LocalKhataPalette = staticCompositionLocalOf { LightKhataPalette }
+private val RoyalBlue: Color
+    @Composable get() = LocalKhataPalette.current.royalBlue
+private val PageWhite: Color
+    @Composable get() = LocalKhataPalette.current.pageBackground
+private val PrimaryTint: Color
+    @Composable get() = LocalKhataPalette.current.primaryTint
+private val MutedText: Color
+    @Composable get() = LocalKhataPalette.current.mutedText
+private val SurfaceBorder: Color
+    @Composable get() = LocalKhataPalette.current.surfaceBorder
+private val JamaGreen: Color
+    @Composable get() = LocalKhataPalette.current.jamaGreen
+private val JamaTint: Color
+    @Composable get() = LocalKhataPalette.current.jamaTint
+private val WarningText: Color
+    @Composable get() = LocalKhataPalette.current.warningText
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,37 +135,93 @@ class MainActivity : FragmentActivity() {
 
         LocalApiServer.start(applicationContext)
         KhataDatabaseProvider.get(applicationContext)
+        LocalAutomaticBackupScheduler.ensureScheduled(applicationContext)
 
         setContent {
-            MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = RoyalBlue,
-                    onPrimary = Color.White,
-                    secondary = Color(0xFFD4AF37),
-                    background = PageWhite,
-                    surface = Color.White,
-                    onSurface = Color(0xFF17243A),
-                    onSurfaceVariant = MutedText,
-                    outline = SurfaceBorder,
-                    error = Color(0xFFC62828)
-                ),
-                typography = Typography(
-                    bodyLarge = TextStyle(fontFamily = FontFamily.SansSerif)
-                ),
-                shapes = Shapes(
-                    small = RoundedCornerShape(12.dp),
-                    medium = RoundedCornerShape(18.dp),
-                    large = RoundedCornerShape(24.dp)
+            val context = LocalContext.current
+            var appearanceMode by remember {
+                mutableStateOf(AppearancePreferenceStore.load(context))
+            }
+            var appearanceError by remember { mutableStateOf<String?>(null) }
+
+            KhataBookTheme(appearanceMode) {
+                KhataBookApp(
+                    appearanceMode = appearanceMode,
+                    appearanceError = appearanceError,
+                    onAppearanceModeChanged = { mode ->
+                        try {
+                            AppearancePreferenceStore.save(context, mode)
+                            appearanceMode = mode
+                            appearanceError = null
+                        } catch (e: Exception) {
+                            appearanceError = e.message ?: "Unable to save appearance setting."
+                        }
+                    }
                 )
-            ) {
-                KhataBookApp()
             }
         }
     }
 }
 
 @Composable
-fun KhataBookApp() {
+private fun KhataBookTheme(
+    mode: AppAppearanceMode,
+    content: @Composable () -> Unit
+) {
+    val darkTheme = when (mode) {
+        AppAppearanceMode.SYSTEM -> isSystemInDarkTheme()
+        AppAppearanceMode.LIGHT -> false
+        AppAppearanceMode.DARK -> true
+    }
+    val palette = if (darkTheme) DarkKhataPalette else LightKhataPalette
+    val colorScheme = if (darkTheme) {
+        darkColorScheme(
+            primary = Color(0xFF174EA6),
+            onPrimary = Color.White,
+            secondary = Color(0xFFD4AF37),
+            background = palette.pageBackground,
+            surface = Color(0xFF151B25),
+            onSurface = Color(0xFFE6EAF0),
+            onSurfaceVariant = palette.mutedText,
+            outline = palette.surfaceBorder,
+            error = Color(0xFFFFB4AB)
+        )
+    } else {
+        lightColorScheme(
+            primary = palette.royalBlue,
+            onPrimary = Color.White,
+            secondary = Color(0xFFD4AF37),
+            background = palette.pageBackground,
+            surface = Color.White,
+            onSurface = Color(0xFF17243A),
+            onSurfaceVariant = palette.mutedText,
+            outline = palette.surfaceBorder,
+            error = Color(0xFFC62828)
+        )
+    }
+
+    CompositionLocalProvider(LocalKhataPalette provides palette) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography(
+                bodyLarge = TextStyle(fontFamily = FontFamily.SansSerif)
+            ),
+            shapes = Shapes(
+                small = RoundedCornerShape(12.dp),
+                medium = RoundedCornerShape(18.dp),
+                large = RoundedCornerShape(24.dp)
+            ),
+            content = content
+        )
+    }
+}
+
+@Composable
+fun KhataBookApp(
+    appearanceMode: AppAppearanceMode,
+    appearanceError: String?,
+    onAppearanceModeChanged: (AppAppearanceMode) -> Unit
+) {
     val context = LocalContext.current
     val database = remember { KhataDatabaseProvider.get(context) }
     val api = remember(context) { LocalApiClient(context) }
@@ -123,6 +233,40 @@ fun KhataBookApp() {
     var pinConfigured by remember { mutableStateOf(false) }
     var pinUnlocked by remember { mutableStateOf(false) }
     var recoveryError by remember { mutableStateOf<String?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner, signedIn, pinConfigured, pinUnlocked) {
+        var lockJob: Job? = null
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    if (signedIn && pinConfigured && pinUnlocked) {
+                        lockJob?.cancel()
+                        lockJob = scope.launch {
+                            delay(60_000)
+                            pinUnlocked = false
+                        }
+                    }
+                }
+                Lifecycle.Event.ON_START -> {
+                    lockJob?.cancel()
+                    lockJob = null
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            lockJob?.cancel()
+        }
+    }
+
+    LaunchedEffect(signedIn, pinUnlocked) {
+        if (signedIn && pinUnlocked && LocalAutomaticBackupFiles.latest(context) == null) {
+            LocalAutomaticBackupScheduler.createInitialBackup(context)
+        }
+    }
 
     LaunchedEffect(Unit) {
         signedIn = try {
@@ -216,6 +360,9 @@ fun KhataBookApp() {
             MainDashboard(
                 database = database,
                 authRepository = authRepository,
+                appearanceMode = appearanceMode,
+                appearanceError = appearanceError,
+                onAppearanceModeChanged = onAppearanceModeChanged,
                 onLogout = {
                     pinConfigured = PinLockStore.hasPin(context)
                     pinUnlocked = false
@@ -321,7 +468,7 @@ private fun PinSetupScreen(
         Spacer(Modifier.height(12.dp))
         Text(
             "Your PIN is stored securely on this device. It is not your account password.",
-            color = Color.Gray,
+            color = MutedText,
             fontSize = 12.sp
         )
     }
@@ -538,7 +685,7 @@ fun AuthScreen(
                 isRegister -> "Create your local account"
                 else -> "Sign in to your local account"
             },
-            color = Color.DarkGray
+            color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(Modifier.height(28.dp))
 
@@ -636,7 +783,7 @@ fun AuthScreen(
             } else {
                 "Your account and ledger are stored privately on this device."
             },
-            color = Color.Gray,
+            color = MutedText,
             fontSize = 12.sp
         )
     }
@@ -646,6 +793,9 @@ fun AuthScreen(
 fun MainDashboard(
     database: KhataDatabase,
     authRepository: AuthRepository,
+    appearanceMode: AppAppearanceMode,
+    appearanceError: String?,
+    onAppearanceModeChanged: (AppAppearanceMode) -> Unit,
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -702,7 +852,7 @@ fun MainDashboard(
             Column {
                 HorizontalDivider(color = SurfaceBorder, thickness = 0.5.dp)
                 NavigationBar(
-                    containerColor = Color.White,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     tonalElevation = 0.dp
                 ) {
                     tabs.forEachIndexed { index, label ->
@@ -785,6 +935,9 @@ fun MainDashboard(
                     accountId = id,
                     businessName = businessName,
                     authRepository = authRepository,
+                    appearanceMode = appearanceMode,
+                    appearanceError = appearanceError,
+                    onAppearanceModeChanged = onAppearanceModeChanged,
                     onBusinessNameChanged = { businessName = it },
                     onLogout = onLogout,
                     onLogoutError = { error = it }
@@ -801,6 +954,9 @@ private fun DashboardTabContent(
     accountId: String,
     businessName: String,
     authRepository: AuthRepository,
+    appearanceMode: AppAppearanceMode,
+    appearanceError: String?,
+    onAppearanceModeChanged: (AppAppearanceMode) -> Unit,
     onBusinessNameChanged: (String) -> Unit,
     onLogout: () -> Unit,
     onLogoutError: (String) -> Unit
@@ -819,6 +975,27 @@ private fun DashboardTabContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text("Settings", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                AppearancePreferenceSection(
+                    mode = appearanceMode,
+                    error = appearanceError,
+                    onModeSelected = onAppearanceModeChanged
+                )
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(22.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("App lock", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "The app locks behind your PIN after it stays in the background for one minute.",
+                            color = MutedText,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
                 BusinessProfileSection(
                     database = database,
                     accountId = accountId,
@@ -826,6 +1003,7 @@ private fun DashboardTabContent(
                     onBusinessNameChanged = onBusinessNameChanged
                 )
                 StatementSharingPreferenceSection()
+                AutomaticBackupSection()
                 KhataBackupSection(database)
                 Button(
                     onClick = {
@@ -877,7 +1055,7 @@ private fun BusinessSetupScreen(
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             shape = RoundedCornerShape(24.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -1040,7 +1218,7 @@ fun HomeScreen(database: KhataDatabase, businessId: String?) {
                 Spacer(Modifier.height(12.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     shape = RoundedCornerShape(20.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -1109,7 +1287,7 @@ private fun TransactionSummaryRow(
     val isUdhar = transaction.type == "UDHAR"
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(18.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -1142,7 +1320,7 @@ private fun TransactionSummaryRow(
 private fun EmptyStateCard(title: String, description: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(22.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -1167,7 +1345,7 @@ fun SummaryCard(
 ) {
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(22.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -1529,7 +1707,7 @@ fun ReportsScreen(
             else -> items(outstandingCustomers, key = { "balance-${it.key}" }) { entry ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     shape = RoundedCornerShape(18.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -1614,7 +1792,7 @@ private fun BusinessProfileSection(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(22.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -1810,8 +1988,8 @@ fun CustomerScreen(
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.White,
-                focusedContainerColor = Color.White
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                focusedContainerColor = MaterialTheme.colorScheme.surface
             )
         )
 
@@ -1836,7 +2014,7 @@ fun CustomerScreen(
             }
             customers.isEmpty() -> Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(22.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -1880,14 +2058,14 @@ fun CustomerScreen(
                     }
                     val statusSurface = when {
                         balance > 0L -> PrimaryTint
-                        balance < 0L -> Color(0xFFE9F5ED)
+                        balance < 0L -> JamaTint
                         else -> PageWhite
                     }
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { selectedCustomer = customer },
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(20.dp),
                         border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -2181,6 +2359,7 @@ fun CustomerLedgerScreen(
     var exportingPdf by remember { mutableStateOf(false) }
     var pdfExportMessage by remember { mutableStateOf<String?>(null) }
     var pdfExportFailed by remember { mutableStateOf(false) }
+    var transactionSearchQuery by remember(customer.id) { mutableStateOf("") }
     var selectedTransactionPeriod by remember(customer.id) {
         mutableStateOf(LedgerPeriod.ALL_TIME)
     }
@@ -2196,7 +2375,13 @@ fun CustomerLedgerScreen(
         ledgerNow
     )
     val visibleTransactions = transactions.filter {
-        LedgerCalculator.isWithinPeriod(it.createdAt, ledgerPeriodStart, ledgerNow)
+        LedgerCalculator.isWithinPeriod(it.createdAt, ledgerPeriodStart, ledgerNow) &&
+            LedgerCalculator.matchesTransactionSearch(
+                transactionSearchQuery,
+                it.note,
+                it.type,
+                it.amountPaise
+            )
     }
 
     val pdfLauncher = rememberLauncherForActivityResult(
@@ -2286,7 +2471,7 @@ fun CustomerLedgerScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             shape = RoundedCornerShape(24.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -2297,11 +2482,11 @@ fun CustomerLedgerScreen(
                     formatRupees(kotlin.math.abs(balance)),
                     fontSize = 31.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (balance >= 0) RoyalBlue else Color(0xFF16834A)
+                    color = if (balance >= 0) RoyalBlue else JamaGreen
                 )
                 Surface(
                     shape = RoundedCornerShape(50.dp),
-                    color = if (balance < 0) Color(0xFFE9F5ED) else PrimaryTint
+                    color = if (balance < 0) JamaTint else PrimaryTint
                 ) {
                     Text(
                         if (balance > 0) "Customer owes you"
@@ -2423,6 +2608,24 @@ fun CustomerLedgerScreen(
 
         Text("Transaction history", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
 
+        OutlinedTextField(
+            value = transactionSearchQuery,
+            onValueChange = { transactionSearchQuery = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Search notes, amounts or type") },
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = null, tint = MutedText)
+            },
+            trailingIcon = {
+                if (transactionSearchQuery.isNotEmpty()) {
+                    IconButton(onClick = { transactionSearchQuery = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear search")
+                    }
+                }
+            },
+            singleLine = true
+        )
+
         Row(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -2447,7 +2650,11 @@ fun CustomerLedgerScreen(
                 color = MutedText
             )
             visibleTransactions.isEmpty() -> Text(
-                "No transactions in this period.",
+                if (transactionSearchQuery.isBlank()) {
+                    "No transactions in this period."
+                } else {
+                    "No matching transactions in this period."
+                },
                 color = MutedText
             )
             else -> LazyColumn(
@@ -2459,7 +2666,7 @@ fun CustomerLedgerScreen(
                     val isUdhar = item.type == "UDHAR"
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(20.dp),
                         border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -2479,7 +2686,7 @@ fun CustomerLedgerScreen(
                                 Surface(
                                     modifier = Modifier.size(42.dp),
                                     shape = CircleShape,
-                                    color = if (isUdhar) PrimaryTint else Color(0xFFE9F5ED)
+                                    color = if (isUdhar) PrimaryTint else JamaTint
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
@@ -2675,7 +2882,7 @@ fun CustomerLedgerScreen(
                     if (whatsappPhone == null) {
                         Text(
                             "A valid Indian mobile number is not saved. Continue to share using another app.",
-                            color = Color(0xFF9A5B00),
+                            color = WarningText,
                             fontSize = 12.sp
                         )
                     } else if (selectedShareTarget == StatementShareTarget.SYSTEM_SHARE) {
@@ -2790,7 +2997,7 @@ private fun StatementSharingPreferenceSection() {
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(22.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -2846,6 +3053,131 @@ private fun StatementSharingPreferenceSection() {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun AppearancePreferenceSection(
+    mode: AppAppearanceMode,
+    error: String?,
+    onModeSelected: (AppAppearanceMode) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(22.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Appearance", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            AppAppearanceMode.entries.forEach { option ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onModeSelected(option) }
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = mode == option,
+                        onClick = { onModeSelected(option) }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(option.label)
+                }
+            }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+        }
+    }
+}
+
+@Composable
+private fun AutomaticBackupSection() {
+    val context = LocalContext.current
+    val api = remember(context) { LocalApiClient(context) }
+    val scope = rememberCoroutineScope()
+    var latestBackup by remember(context) {
+        mutableStateOf(LocalAutomaticBackupFiles.latest(context))
+    }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var confirmRestore by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(22.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Automatic local backups", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Encrypted daily and weekly copies are stored privately on this device. " +
+                    "The newest 7 of each are kept; these copies do not survive uninstall.",
+                color = MutedText,
+                fontSize = 13.sp
+            )
+            Text(
+                latestBackup?.let {
+                    val date = java.text.DateFormat.getDateTimeInstance(
+                        java.text.DateFormat.MEDIUM,
+                        java.text.DateFormat.SHORT
+                    ).format(java.util.Date(it.lastModified()))
+                    "Latest copy: $date"
+                } ?: "No automatic backup has completed yet.",
+                color = MutedText,
+                fontSize = 12.sp
+            )
+            OutlinedButton(
+                enabled = !busy && latestBackup != null,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { confirmRestore = true }
+            ) {
+                Text(if (busy) "Please wait..." else "Restore Latest Automatic Backup")
+            }
+            status?.let { Text(it, color = if (it.startsWith("Restore completed")) JamaGreen else MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+        }
+    }
+
+    if (confirmRestore) {
+        AlertDialog(
+            onDismissRequest = { confirmRestore = false },
+            title = { Text("Restore automatic backup?") },
+            text = {
+                Text("This replaces the current local ledger with the latest encrypted automatic copy.")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !busy,
+                    onClick = {
+                        val file = latestBackup ?: return@TextButton
+                        confirmRestore = false
+                        busy = true
+                        status = null
+                        scope.launch {
+                            try {
+                                val bytes = withContext(Dispatchers.IO) {
+                                    LocalAutomaticBackupFiles.read(file)
+                                }
+                                api.restoreAutomaticBackup(bytes)
+                                status = "Restore completed."
+                            } catch (e: Exception) {
+                                if (e is kotlinx.coroutines.CancellationException) throw e
+                                status = e.message ?: "Automatic backup restore failed."
+                            } finally {
+                                busy = false
+                                latestBackup = LocalAutomaticBackupFiles.latest(context)
+                            }
+                        }
+                    }
+                ) { Text("Restore") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRestore = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -2924,7 +3256,7 @@ private fun KhataBackupSection(database: KhataDatabase) {
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(22.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -2980,7 +3312,7 @@ private fun KhataBackupSection(database: KhataDatabase) {
             Text(
                 "Restore replaces current local data. Keep a separate backup first. " +
                     "A forgotten backup password cannot be recovered.",
-                color = Color(0xFF9A5B00), fontSize = 12.sp
+                color = WarningText, fontSize = 12.sp
             )
             status?.let { Text(it, color = if (
                 it.contains("failed", true) || it.contains("wrong", true) ||

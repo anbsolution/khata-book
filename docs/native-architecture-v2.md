@@ -22,9 +22,15 @@
 - On the first local account setup, legacy on-device businesses are claimed by that account without
   changing business, customer, or transaction IDs or deleting ledger data.
 - The existing device PIN and biometric unlock remain device-local and independent of the password.
+- When a PIN is configured, the app returns to the lock screen after it has stayed in the background
+  for one minute.
+- Appearance can follow the system setting or be fixed to light or dark mode.
 
 ## Backup and restore
 - Encrypted backup and restore remain on-device through the local API and Android document picker.
+- Daily and weekly automatic backups are encrypted with an Android Keystore key and retained in
+  app-private storage (up to seven copies of each cadence). They are removed when the app is
+  uninstalled; use a password-protected manual backup to transfer data or keep a portable copy.
 - Backup restore validates references and replaces the local ledger transactionally; restored
   businesses are assigned to the currently signed-in local account.
 - The database migration removes only the obsolete synchronization queue. It preserves all ledger

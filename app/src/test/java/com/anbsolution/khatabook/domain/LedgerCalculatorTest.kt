@@ -52,4 +52,18 @@ class LedgerCalculatorTest {
         assertFalse(LedgerCalculator.isWithinPeriod(todayStart - 1, todayStart, now))
         assertFalse(LedgerCalculator.isWithinPeriod(now + 1, todayStart, now))
     }
+
+    @Test
+    fun transactionSearchMatchesNotesTypesAndDisplayedAmounts() {
+        assertTrue(LedgerCalculator.matchesTransactionSearch("school", "School fees", "UDHAR", 125_050L))
+        assertTrue(LedgerCalculator.matchesTransactionSearch("jama", "Received", "JAMA", 125_050L))
+        assertTrue(LedgerCalculator.matchesTransactionSearch("1250.5", "Received", "JAMA", 125_050L))
+        assertFalse(LedgerCalculator.matchesTransactionSearch("rent", "School fees", "UDHAR", 125_050L))
+        assertFalse(LedgerCalculator.matchesTransactionSearch("100", "", "JAMA", 100L))
+    }
+
+    @Test
+    fun blankTransactionSearchMatchesEveryEntry() {
+        assertTrue(LedgerCalculator.matchesTransactionSearch("  ", "", "UDHAR", 100L))
+    }
 }

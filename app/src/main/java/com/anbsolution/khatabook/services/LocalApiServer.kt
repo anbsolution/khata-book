@@ -184,6 +184,12 @@ object LocalApiServer {
             }
             return ApiResponse.json(200, JSONObject().put("user", account!!.toUser().toJson()))
         }
+        if (route == "/v1/backup/automatic" && request.method == "POST") {
+            val bytes = KhataBackupManager.createAutomaticBackup(
+                KhataDatabaseProvider.get(context)
+            )
+            return ApiResponse.binary(200, bytes)
+        }
 
         val accountId = request.headers["x-local-user"]
             ?: throw ApiFault(401, "sign_in_required", "Sign in to your local account first.")
@@ -329,6 +335,14 @@ object LocalApiServer {
                 KhataDatabaseProvider.get(context),
                 request.body,
                 password,
+                account.id
+            )
+            return ApiResponse.json(200, JSONObject().put("restored", true))
+        }
+        if (route == "/v1/backup/automatic/restore" && request.method == "POST") {
+            KhataBackupManager.restoreAutomaticBackup(
+                KhataDatabaseProvider.get(context),
+                request.body,
                 account.id
             )
             return ApiResponse.json(200, JSONObject().put("restored", true))

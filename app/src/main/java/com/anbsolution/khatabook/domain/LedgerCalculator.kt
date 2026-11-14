@@ -1,6 +1,8 @@
 package com.anbsolution.khatabook.domain
 
+import java.math.BigDecimal
 import java.util.Calendar
+import java.util.Locale
 
 enum class LedgerPeriod {
     TODAY,
@@ -39,4 +41,21 @@ object LedgerCalculator {
 
     fun isWithinPeriod(timestamp: Long, startMillis: Long, endMillis: Long): Boolean =
         timestamp >= startMillis && timestamp <= endMillis
+
+    fun matchesTransactionSearch(
+        query: String,
+        note: String,
+        type: String,
+        amountPaise: Long
+    ): Boolean {
+        val normalizedQuery = query.trim().lowercase(Locale.ROOT)
+        if (normalizedQuery.isEmpty()) return true
+
+        val rupeeAmount = BigDecimal.valueOf(amountPaise, 2)
+            .stripTrailingZeros()
+            .toPlainString()
+        return note.lowercase(Locale.ROOT).contains(normalizedQuery) ||
+            type.lowercase(Locale.ROOT).contains(normalizedQuery) ||
+            rupeeAmount.contains(normalizedQuery)
+    }
 }

@@ -20,6 +20,12 @@ Premium, trustworthy, clean and practical bookkeeping UI with an iOS-inspired vi
 | `text` | `#17243A` | Main text |
 | `muted` | `#667085` | Secondary text, hints |
 
+## 2.1 Dark appearance
+The dark theme follows the same semantic roles with `#0D1117` for the page, `#151B25` for cards,
+`#E6EAF0` for primary text, `#A0A8B5` for muted text, and `#344054` for borders. Use `#9DBBFF`
+for blue text accents and `#72D19B` for positive values. Keep credit/debit labels in addition to
+color so the meaning remains accessible.
+
 ## 3. Typography
 - Hindi: Noto Sans Devanagari.
 - Use the native sans-serif family for consistent Android rendering; keep numerals highly legible.

@@ -1,13 +1,18 @@
 package com.anbsolution.khatabook.services
 
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import androidx.room.withTransaction
 import com.anbsolution.khatabook.data.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
@@ -15,10 +20,12 @@ import javax.crypto.spec.SecretKeySpec
 
 object KhataBackupManager {
     private val MAGIC = "KHATAV01".toByteArray(Charsets.US_ASCII)
+    private val AUTO_MAGIC = "KHATAAUTO1".toByteArray(Charsets.US_ASCII)
     private const val ITERATIONS = 260_000
     private const val MAX_BYTES = 50 * 1024 * 1024
     private const val SALT_SIZE = 16
     private const val IV_SIZE = 12
+    private const val AUTO_KEY_ALIAS = "khata_book_automatic_backup_key"
 
     private data class Snapshot(
         val businesses: List<BusinessEntity>,
@@ -28,17 +35,14 @@ object KhataBackupManager {
 
     suspend fun createBackup(database: KhataDatabase, password: String): ByteArray {
         require(password.length >= 12) { "Backup password must contain at least 12 characters." }
-        val snapshot = database.withTransaction {
-            val dao = database.khataDao()
-            Snapshot(
-                dao.getAllBusinessesForBackup(),
-                dao.getAllCustomersForBackup(),
-                dao.getAllTransactionsForBackup()
-            )
-        }
-        return encrypt(encode(snapshot).toString().toByteArray(Charsets.UTF_8), password)
+        return encrypt(encode(readSnapshot(database)).toString().toByteArray(Charsets.UTF_8), password)
             .also { require(it.size <= MAX_BYTES) { "Backup exceeds the 50 MB limit." } }
     }
+
+    suspend fun createAutomaticBackup(database: KhataDatabase): ByteArray =
+        encryptAutomatically(
+            encode(readSnapshot(database)).toString().toByteArray(Charsets.UTF_8)
+        ).also { require(it.size <= MAX_BYTES) { "Automatic backup exceeds the 50 MB limit." } }
 
     suspend fun restoreBackup(
         database: KhataDatabase,
@@ -51,6 +55,36 @@ object KhataBackupManager {
             "Backup file size or format is invalid."
         }
         val snapshot = decode(decrypt(bytes, password))
+        replaceSnapshot(database, snapshot, accountId)
+    }
+
+    suspend fun restoreAutomaticBackup(
+        database: KhataDatabase,
+        bytes: ByteArray,
+        accountId: String
+    ) {
+        require(bytes.size in (AUTO_MAGIC.size + IV_SIZE + 16)..MAX_BYTES) {
+            "Automatic backup file size or format is invalid."
+        }
+        val snapshot = decode(decryptAutomatically(bytes))
+        replaceSnapshot(database, snapshot, accountId)
+    }
+
+    private suspend fun readSnapshot(database: KhataDatabase): Snapshot =
+        database.withTransaction {
+            val dao = database.khataDao()
+            Snapshot(
+                dao.getAllBusinessesForBackup(),
+                dao.getAllCustomersForBackup(),
+                dao.getAllTransactionsForBackup()
+            )
+        }
+
+    private suspend fun replaceSnapshot(
+        database: KhataDatabase,
+        snapshot: Snapshot,
+        accountId: String?
+    ) {
         database.withTransaction {
             val dao = database.khataDao()
             dao.clearTransactionsForRestore()
@@ -88,6 +122,58 @@ object KhataBackupManager {
         return ByteArrayOutputStream().apply {
             write(MAGIC); write(salt); write(iv); write(encrypted)
         }.toByteArray()
+    }
+
+    private fun encryptAutomatically(plain: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, automaticBackupKey())
+        cipher.updateAAD(AUTO_MAGIC)
+        return ByteArrayOutputStream().apply {
+            write(AUTO_MAGIC)
+            write(cipher.iv)
+            write(cipher.doFinal(plain))
+        }.toByteArray()
+    }
+
+    private fun decryptAutomatically(file: ByteArray): ByteArray {
+        require(file.copyOfRange(0, AUTO_MAGIC.size).contentEquals(AUTO_MAGIC)) {
+            "This is not a supported automatic Khata Book backup."
+        }
+        val ivAt = AUTO_MAGIC.size
+        val dataAt = ivAt + IV_SIZE
+        return try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                automaticBackupKey(),
+                GCMParameterSpec(128, file.copyOfRange(ivAt, dataAt))
+            )
+            cipher.updateAAD(AUTO_MAGIC)
+            cipher.doFinal(file.copyOfRange(dataAt, file.size))
+        } catch (_: AEADBadTagException) {
+            throw IllegalArgumentException("Automatic backup authentication failed.")
+        }
+    }
+
+    @Synchronized
+    private fun automaticBackupKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore")
+        keyStore.load(null)
+        (keyStore.getKey(AUTO_KEY_ALIAS, null) as? SecretKey)?.let { return it }
+
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(
+                AUTO_KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .setRandomizedEncryptionRequired(true)
+                .build()
+        )
+        return generator.generateKey()
     }
 
     private fun decrypt(file: ByteArray, password: String): ByteArray {
