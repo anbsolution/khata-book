@@ -18,13 +18,10 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "APPWRITE_ENDPOINT", "\"https://sgp.cloud.appwrite.io/v1\"")
-        buildConfigField("String", "APPWRITE_PROJECT_ID", "\"khata-book-prod\"")
     }
 
     buildFeatures {
         compose = true
-        buildConfig = true
     }
 
     compileOptions {
@@ -38,7 +35,6 @@ android {
 }
 
 dependencies {
-    implementation("io.appwrite:sdk-for-android:31.0.1")
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
 
     implementation(composeBom)
@@ -62,7 +58,6 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")
 
-    implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.datastore:datastore-preferences:1.1.2")
 
     testImplementation("junit:junit:4.13.2")

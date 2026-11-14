@@ -1,5 +1,14 @@
 package com.anbsolution.khatabook.domain
 
+import java.util.Calendar
+
+enum class LedgerPeriod {
+    TODAY,
+    LAST_7_DAYS,
+    THIS_MONTH,
+    ALL_TIME
+}
+
 object LedgerCalculator {
     fun balancePaise(creditPaise: Long, paymentPaise: Long): Long {
         require(creditPaise >= 0) { "Credit cannot be negative" }
@@ -10,4 +19,24 @@ object LedgerCalculator {
     fun validateAmount(amountPaise: Long) {
         require(amountPaise > 0) { "Amount must be greater than zero" }
     }
+
+    fun periodStartMillis(period: LedgerPeriod, now: Long): Long {
+        if (period == LedgerPeriod.ALL_TIME) return Long.MIN_VALUE
+        return Calendar.getInstance().apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            when (period) {
+                LedgerPeriod.TODAY -> Unit
+                LedgerPeriod.LAST_7_DAYS -> add(Calendar.DAY_OF_YEAR, -6)
+                LedgerPeriod.THIS_MONTH -> set(Calendar.DAY_OF_MONTH, 1)
+                LedgerPeriod.ALL_TIME -> Unit
+            }
+        }.timeInMillis
+    }
+
+    fun isWithinPeriod(timestamp: Long, startMillis: Long, endMillis: Long): Boolean =
+        timestamp >= startMillis && timestamp <= endMillis
 }

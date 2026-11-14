@@ -1,6 +1,15 @@
 # ANB Khata Book — Screen Specifications v1.0
 
-The following screens define the v1.0 UI scope. These are specifications, not implemented screens.
+The following screens define the v1.0 UI behavior.
+
+## 00. Local Sign-in and Device Lock
+- On a device with no local account, accept the business owner's existing email and a newly chosen
+  local password; cloud credentials are not migrated.
+- If legacy ledger rows are present, claim them for the new local account without deleting or
+  changing the IDs of businesses, customers, or transactions.
+- On later launches, sign in with the locally stored password hash.
+- Keep the device PIN and supported biometric unlock independent from account sign-in.
+- Account and ledger operations remain local to the device.
 
 ## 01. Splash
 - ANB Khata Book logo and product name.
@@ -23,12 +32,10 @@ Validation: trim whitespace; require a non-empty business name.
 ## 03. Dashboard
 Sections:
 - Business name and app header.
-- Total outstanding.
-- Total credit given (Udhar).
-- Total payments received (Jama).
+- Current net outstanding and customer advances, calculated from local ledger entries.
+- Customer and transaction counts.
 - Today's collection and today's credit.
-- Customer count.
-- Recent transactions.
+- Recent transactions with customer, type, date and amount.
 - Quick actions: Add Customer, Add Transaction, Reports, Backup.
 All figures must be calculated from local records, not hard-coded sample data.
 
@@ -36,7 +43,7 @@ All figures must be calculated from local records, not hard-coded sample data.
 - Search by customer name or phone.
 - Add customer action.
 - Customer name and optional phone.
-- Current balance and status: Outstanding, Advance, Settled.
+- Current balance and status: Outstanding, Advance or Settled.
 - Filters for all, outstanding, advance and settled.
 - Edit and archive actions.
 - Archived customers remain linked to their historical transactions.
@@ -45,8 +52,10 @@ All figures must be calculated from local records, not hard-coded sample data.
 - Customer name and phone.
 - Total Udhar, total Jama and current balance.
 - Transaction timeline with date, type, amount and note.
-- Date filter.
+- Transaction history filter: Today, Last 7 days, This month or All time.
+- Ledger totals and statement exports remain based on the full customer history.
 - Actions: Add Udhar, Add Jama, WhatsApp Share, PDF statement.
+- PDF export saves a paginated statement with customer totals and the full transaction history.
 - WhatsApp action opens an editable preview before handing off to WhatsApp.
 - Do not expose unrelated customers' data in the share preview.
 
@@ -62,24 +71,27 @@ Actions: Save and Cancel.
 Show a clear summary before saving when appropriate.
 
 ## 07. WhatsApp Share Preview
-- Customer name and validated phone number.
+- Customer name and phone number; invalid numbers show a warning and use the system share sheet.
 - Business name.
 - Total Udhar, total Jama and current balance.
-- Optional recent transaction summary.
+- Up to five recent transaction entries.
 - Editable message text.
-- Button to open WhatsApp with a prefilled message.
+- Button to open WhatsApp or WhatsApp Business with a prefilled message.
 - User must review and manually press Send inside WhatsApp.
-- If WhatsApp is unavailable, offer the system share sheet or copy-message fallback.
+- If WhatsApp is unavailable, open the Android Sharesheet with the reviewed message.
 - Sending requires internet and WhatsApp availability; local ledger remains offline.
 - Never claim delivery/read status unless a supported source provides it.
 
 ## 08. Reports
-- Daily, weekly and monthly summaries.
+- Today, last-seven-days, current-month and all-time summaries.
+- Udhar, Jama, period net, and transaction count from local ledger entries.
+- Current outstanding balances by customer.
+- Recent period transactions.
 - Customer statement.
 - Outstanding report.
 - Collection report.
 - Date range selection.
-- PDF and CSV export.
+- PDF and CSV export for the selected period, including all period transactions and current outstanding balances.
 - Report totals must reconcile with the ledger calculation engine.
 
 ## 09. Backup and Restore
@@ -92,13 +104,13 @@ Show a clear summary before saving when appropriate.
 - Backup and restore must work without network access.
 
 ## 10. Settings
-- Business profile.
+- Editable business name stored in the local business profile.
 - App lock/PIN.
 - Biometric unlock where device/platform supports it.
 - Language: Hindi and English.
 - Theme preferences.
 - Backup and restore.
-- WhatsApp sharing preferences.
+- Statement-sharing preference: automatic, WhatsApp, WhatsApp Business or Android share sheet.
 - Data management.
 - About and version information.
 

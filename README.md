@@ -1,30 +1,12 @@
-# ANB Khata Book v1.0
+# ANB Khata Book
 
-Premium offline-first digital bahi-khata for a single business, targeting Android APK and Web PWA.
+Native Android ledger app for a single business. Customer and transaction data remains in the
+app-private Room/SQLite database. The app routes ledger operations through a dedicated local HTTP
+server bound only to `127.0.0.1`; there is no remote backend or cloud dependency.
 
-## Phase 1 status
-UI/UX design specification prepared. This package contains design documentation only; it does not contain application code, a runnable app, or test results.
+The first local setup uses the business owner's existing email and a newly chosen local password.
+The existing device PIN/biometric lock remains available. Encrypted backup and restore are explicit
+local operations; no automatic synchronization occurs.
 
-## Approved product decisions
-- Product: ANB Khata Book
-- Platforms: Android APK + Web PWA
-- Business model: Single business
-- Architecture: Offline-first; no mandatory cloud/server dependency
-- Visual theme: Royal Blue + Royal Gold + Premium White
-- Customer sharing: WhatsApp share intent/link with editable preview; user manually confirms sending
-- Development workflow: Android + Termux, push directly to `main`, GitHub Actions builds Android and Web artifacts
-- Phase testing policy: Test only after all deliverables for the current phase are complete
-
-## Phase 1 deliverables
-See `docs/`:
-- `design-system.md`
-- `screen-specifications.md`
-- `navigation-and-responsive.md`
-- `ux-and-accessibility.md`
-- `phase-1-checklist.md`
-
-## Important behavior
-Android and Web use separate local databases (SQLite and IndexedDB respectively). They share business rules and UI conventions, but do not automatically synchronize. Moving data between them is through explicit backup/restore in v1.0.
-
-## Next phase
-Phase 2: project foundation and repository scaffold. Do not start Phase 2 until Phase 1 documentation is reviewed and approved.
+See [the Android architecture](docs/native-architecture-v2.md) and the UI/product specifications
+under `docs/`.

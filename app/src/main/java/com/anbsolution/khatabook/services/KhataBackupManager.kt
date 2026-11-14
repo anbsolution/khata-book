@@ -23,8 +23,7 @@ object KhataBackupManager {
     private data class Snapshot(
         val businesses: List<BusinessEntity>,
         val customers: List<CustomerEntity>,
-        val transactions: List<LedgerTransactionEntity>,
-        val queue: List<SyncQueueEntity>
+        val transactions: List<LedgerTransactionEntity>
     )
 
     suspend fun createBackup(database: KhataDatabase, password: String): ByteArray {
@@ -34,14 +33,19 @@ object KhataBackupManager {
             Snapshot(
                 dao.getAllBusinessesForBackup(),
                 dao.getAllCustomersForBackup(),
-                dao.getAllTransactionsForBackup(),
-                dao.getAllSyncQueueForBackup()
+                dao.getAllTransactionsForBackup()
             )
         }
         return encrypt(encode(snapshot).toString().toByteArray(Charsets.UTF_8), password)
+            .also { require(it.size <= MAX_BYTES) { "Backup exceeds the 50 MB limit." } }
     }
 
-    suspend fun restoreBackup(database: KhataDatabase, bytes: ByteArray, password: String) {
+    suspend fun restoreBackup(
+        database: KhataDatabase,
+        bytes: ByteArray,
+        password: String,
+        accountId: String? = null
+    ) {
         require(password.length >= 12) { "Backup password must contain at least 12 characters." }
         require(bytes.size in (MAGIC.size + SALT_SIZE + IV_SIZE + 16)..MAX_BYTES) {
             "Backup file size or format is invalid."
@@ -49,14 +53,13 @@ object KhataBackupManager {
         val snapshot = decode(decrypt(bytes, password))
         database.withTransaction {
             val dao = database.khataDao()
-            dao.clearSyncQueueForRestore()
             dao.clearTransactionsForRestore()
             dao.clearCustomersForRestore()
             dao.clearBusinessesForRestore()
             if (snapshot.businesses.isNotEmpty()) dao.insertBusinessesForRestore(snapshot.businesses)
             if (snapshot.customers.isNotEmpty()) dao.insertCustomersForRestore(snapshot.customers)
             if (snapshot.transactions.isNotEmpty()) dao.insertTransactionsForRestore(snapshot.transactions)
-            if (snapshot.queue.isNotEmpty()) dao.insertSyncQueueForRestore(snapshot.queue)
+            if (accountId != null) dao.reassignBusinessesForRestore(accountId)
         }
     }
 
@@ -108,7 +111,7 @@ object KhataBackupManager {
 
     private fun encode(s: Snapshot): JSONObject {
         val root = JSONObject().put("format", "khata-book")
-            .put("schemaVersion", 2).put("exportedAt", System.currentTimeMillis())
+            .put("schemaVersion", 3).put("exportedAt", System.currentTimeMillis())
         root.put("businesses", JSONArray().apply {
             s.businesses.forEach { put(JSONObject().put("id", it.id)
                 .put("accountId", it.accountId).put("businessName", it.businessName)
@@ -125,13 +128,6 @@ object KhataBackupManager {
                 .put("type", it.type).put("amountPaise", it.amountPaise)
                 .put("note", it.note).put("createdAt", it.createdAt).put("synced", it.synced)) }
         })
-        root.put("syncQueue", JSONArray().apply {
-            s.queue.forEach { put(JSONObject().put("id", it.id)
-                .put("entityType", it.entityType).put("entityId", it.entityId)
-                .put("operation", it.operation).put("createdAt", it.createdAt)
-                .put("status", it.status).put("attempts", it.attempts)
-                .put("lastError", it.lastError)) }
-        })
         return root
     }
 
@@ -139,7 +135,7 @@ object KhataBackupManager {
         val root = JSONObject(String(plain, Charsets.UTF_8))
         require(root.getString("format") == "khata-book") { "Backup format is not recognized." }
         val backupVersion = root.getInt("schemaVersion")
-        require(backupVersion in 1..2) { "This backup version is not supported." }
+        require(backupVersion in 1..3) { "This backup version is not supported." }
 
         fun requiredText(o: JSONObject, field: String): String =
             o.getString(field).also { require(it.isNotBlank()) { "Missing $field in backup." } }
@@ -161,27 +157,13 @@ object KhataBackupManager {
                 it.getLong("amountPaise"), it.optString("note", ""),
                 it.getLong("createdAt"), it.optBoolean("synced", false))
         }
-        val queue = root.getJSONArray("syncQueue").mapObjects {
-            SyncQueueEntity(
-                requiredText(it, "id"),
-                requiredText(it, "entityType"),
-                requiredText(it, "entityId"),
-                requiredText(it, "operation"),
-                it.getLong("createdAt"),
-                if (backupVersion >= 2) it.optString("status", "PENDING") else "PENDING",
-                if (backupVersion >= 2) it.optInt("attempts", 0) else 0,
-                if (backupVersion >= 2 && !it.isNull("lastError")) it.optString("lastError") else null
-            )
-        }
-
         fun unique(ids: List<String>, table: String) {
             require(ids.size == ids.toSet().size) { "Duplicate IDs in $table." }
         }
         unique(businesses.map { it.id }, "businesses")
         unique(customers.map { it.id }, "customers")
         unique(transactions.map { it.id }, "transactions")
-        unique(queue.map { it.id }, "sync queue")
-        val businessIds = businesses.map { it.id }.toSet()
+        val businessIds = businesses.flatMap { listOf(it.id, it.accountId) }.toSet()
         val customerById = customers.associateBy { it.id }
         require(customers.all { it.businessId in businessIds }) {
             "A customer refers to a missing business."
@@ -191,6 +173,6 @@ object KhataBackupManager {
             customer != null && customer.businessId == it.businessId &&
                 it.businessId in businessIds
         }) { "A transaction refers to a missing or mismatched customer." }
-        return Snapshot(businesses, customers, transactions, queue)
+        return Snapshot(businesses, customers, transactions)
     }
 }
